@@ -1,97 +1,95 @@
 import numpy as np
-import math
 import matplotlib.pyplot as plt
+import math
+import os
 
-lam_cm = 3.4
-lambd = lam_cm / 100.0
-a = 13.0 / 100.0
-b = 13.0 / 100.0
+lambd = 0.034
+b = 0.13
+ap = 0.13
 
-def sinc_abs(x):
-    out = np.ones_like(x, dtype=float)
-    nz = x != 0
-    out[nz] = np.abs(np.sin(x[nz]) / x[nz])
-    return out
+theta_list = []
+FE = []
+FH = []
 
-theta = np.linspace(-np.pi/2, np.pi/2, 200001)
-theta_deg = np.degrees(theta)
-cfac = (1.0 + np.cos(theta)) / 2.0
+zeros_E = []
+zeros_H = []
+maxima_E = []
+maxima_H = []
 
-u = np.pi * a / lambd * np.sin(theta)  # E-plane
-v = np.pi * b / lambd * np.sin(theta)  # H-plane
-FE = sinc_abs(u) * cfac
-FH = sinc_abs(v) * cfac
+for theta in np.arange(0.0001, np.pi/2, 0.0001):
+    s = np.sin(theta)
+    c = np.cos(theta)
+    xE = (np.pi * b / lambd) * s
+    FE_theta = 1 if abs(xE) < 1e-7 else (np.sin(xE) / xE) * ((1 + c) / 2)
+    xH = (np.pi * ap / lambd) * s
+    denom = 1 - (2 * ap / lambd * s) ** 2
+    FH_theta = 0 if abs(denom) < 1e-7 else (np.cos(xH) / denom) * ((1 + c) / 2)
+    theta_deg = math.degrees(theta)
+    theta_list.append(theta_deg)
+    FE.append(abs(FE_theta))
+    FH.append(abs(FH_theta))
 
-def hpbw_two_sided(fvals, th):
-    target = 1/np.sqrt(2)
-    mid = len(fvals)//2
-    iR = np.argmin(np.abs(fvals[mid:] - target)) + mid
-    iL = np.argmin(np.abs(fvals[:mid] - target))
-    return (float(np.degrees(th[iR] - th[iL])),
-            float(np.degrees(th[iL])),
-            float(np.degrees(th[iR])))
+for i in range(1, len(theta_list)-1):
+    if FE[i] < 0.001 and FE[i-1] > 0.001:
+        zeros_E.append((theta_list[i], FE[i]))
+    if FH[i] < 0.001 and FH[i-1] > 0.001:
+        zeros_H.append((theta_list[i], FH[i]))
+    if FE[i] > FE[i-1] and FE[i] > FE[i+1]:
+        maxima_E.append((theta_list[i], FE[i]))
+    if FH[i] > FH[i-1] and FH[i] > FH[i+1]:
+        maxima_H.append((theta_list[i], FH[i]))
 
-HPBW_H_num, tL_H, tR_H = hpbw_two_sided(FH, theta)
-HPBW_E_num, tL_E, tR_E = hpbw_two_sided(FE, theta)
+fig, ax = plt.subplots(figsize=(10,6))
+ax.plot(theta_list, FE, label="F_E(θ)", linewidth=1)
+ax.plot(theta_list, FH, label="F_H(θ)", linewidth=1)
 
-HPBW_E_theor = 53.0 * lambd / b
-HPBW_H_theor = 80.0 * lambd / a
+if zeros_E:
+    ax.plot([pt[0] for pt in zeros_E], [pt[1] for pt in zeros_E], 'ro', markersize=4)
+if zeros_H:
+    ax.plot([pt[0] for pt in zeros_H], [pt[1] for pt in zeros_H], 'bo', markersize=4)
+if maxima_E:
+    ax.plot([pt[0] for pt in maxima_E], [pt[1] for pt in maxima_E], 'go', markersize=4)
+if maxima_H:
+    ax.plot([pt[0] for pt in maxima_H], [pt[1] for pt in maxima_H], 'mo', markersize=4)
 
-def first_null_deg(D):
-    if D <= lambd: return None
-    return float(np.degrees(np.arcsin(min(1.0, lambd/D))))
+ax.set_xlabel("θ (°)")
+ax.set_ylabel("F(θ)")
+ax.grid(True)
+ax.legend()
 
-null_H = first_null_deg(b)
-null_E = first_null_deg(a)
+os.makedirs("figures", exist_ok=True)
+fig.savefig("figures/DS_LR3_13x13_points.png", dpi=600)
 
-def first_sidelobe_level_db(fvals, th_deg, guard_deg=5.0):
-    f = np.asarray(fvals)
-    th = np.asarray(th_deg)
-    mask = (np.abs(th) > guard_deg)
-    idx = np.where((f[1:-1] > f[:-2]) & (f[1:-1] > f[2:]) & mask[1:-1])[0] + 1
-    if len(idx) == 0: return None
-    i = idx[np.argmax(f[idx])]
-    lvl_db = 20*np.log10(max(1e-12, f[i]))
-    return float(lvl_db), float(th[i])
+print(f"λ = {lambd:.4f} м")
 
-SLL_H = first_sidelobe_level_db(FH, theta_deg)
-SLL_E = first_sidelobe_level_db(FE, theta_deg)
+print("\nНулі F_E(θ):")
+for theta, val in zeros_E:
+    print(f"θ = {theta:.2f}° , F_E = {val:.4f}")
 
-D_est_hpbw = 32400.0 / (HPBW_E_theor * HPBW_H_theor)
-D_est_apert = 4*np.pi*a*b / (lambd**2)
+print("\nнулі F_H(θ):")
+for theta, val in zeros_H:
+    print(f"θ = {theta:.2f}° , F_H = {val:.4f}")
 
-print(f"λ = {lambd:.4f} м   a×b = {a*100:.0f}×{b*100:.0f} см")
-print(f"HPBW(H) чисельно ≈ {HPBW_H_num:.2f}°  | теор. (80λ/a) ≈ {HPBW_H_theor:.2f}°")
-print(f"HPBW(E) численно ≈ {HPBW_E_num:.2f}°  | теор. (53λ/b) ≈ {HPBW_E_theor:.2f}°")
-if null_H: print(f"Перший нуль (H) ≈ ±{null_H:.2f}°")
-if null_E: print(f"Перший нуль (E) ≈ ±{null_E:.2f}°")
-if SLL_H: print(f"Перший бічний пелюсток H: {SLL_H[0]:.2f} дБ @ θ≈{SLL_H[1]:.1f}°")
-if SLL_E: print(f"Перший бічний пелюсток E: {SLL_E[0]:.2f} дБ @ θ≈{SLL_E[1]:.1f}°")
-print(f"Спрямованість (оцінка по ШГП) D ≈ {D_est_hpbw:.1f}")
-print(f"Спрямованість (апертурна)      D ≈ {D_est_apert:.1f}")
+print("\nМаксимуми F_E(θ):")
+for theta, val in maxima_E:
+    print(f"θ = {theta:.2f}° , F_E = {val:.4f}")
 
-plt.figure(figsize=(10,5))
-plt.plot(theta_deg, FH, label=r"$F_H(\theta)$", linewidth=1.0)
-plt.plot(theta_deg, FE, label=r"$F_E(\theta)$", linewidth=1.0)
-plt.axhline(1/np.sqrt(2), linestyle="--", linewidth=0.6)
-plt.plot([tL_H, tR_H], [1/np.sqrt(2), 1/np.sqrt(2)], 'go', markersize=4, label="−3 дБ H")
-plt.plot([tL_E, tR_E], [1/np.sqrt(2), 1/np.sqrt(2)], 'ro', markersize=4, label="−3 дБ E")
+print("\nМаксимуми F_H(θ):")
+for theta, val in maxima_H:
+    print(f"θ = {theta:.2f}° , F_H = {val:.4f}")
 
-hpbwE_half = HPBW_E_theor/2
-hpbwH_half = HPBW_H_theor/2
-for x in (-hpbwE_half, hpbwE_half):
-    plt.axvline(x, ymin=0, ymax=0.72, linestyle="--", linewidth=0.6)
-for x in (-hpbwH_half, hpbwH_half):
-    plt.axvline(x, ymin=0, ymax=0.72, linestyle=":", linewidth=0.6)
+if len(zeros_E) >= 2:
+    width_FE = zeros_E[1][0] - zeros_E[0][0]
+    print(f"\nШирина головної пелюстки F_E ≈ {width_FE:.2f}°")
 
-plt.xlim(-90, 90)
-plt.ylim(-0.02, 1.02)
-plt.grid(True, linestyle="--", linewidth=0.3)
-plt.xlabel("θ, град")
-plt.ylabel("|F(θ)| (нормовані)")
-plt.title("Нормовані ДС пірамідального рупора (площини E та H), з множником (1+cosθ)/2")
-plt.legend()
-plt.tight_layout()
-plt.savefig("LR3_EH.png", dpi=300, bbox_inches="tight")
-plt.show()
+if len(zeros_H) >= 2:
+    width_FH = zeros_H[1][0] - zeros_H[0][0]
+    print(f"Ширина головної пелюстки F_H ≈ {width_FH:.2f}°")
 
+if len(maxima_E) >= 2:
+    SLL_FE = 20 * math.log10(maxima_E[1][1] / maxima_E[0][1])
+    print(f"\nРівень бокового пелюстка F_E (SLL) ≈ {SLL_FE:.2f} дБ")
+
+if len(maxima_H) >= 2:
+    SLL_FH = 20 * math.log10(maxima_H[1][1] / maxima_H[0][1])
+    print(f"Рівень бокового пелюстка F_H (SLL) ≈ {SLL_FH:.2f} дБ")
